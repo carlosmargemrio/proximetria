@@ -30,10 +30,11 @@ DETAILS_PATH = DATA_DIR / "sitios_brasil_detalhes.json"
 META_PATH = DATA_DIR / "sitios_brasil.meta.json"
 NEW_PATH = DATA_DIR / "novos_sitios.json"
 
+
 DEFAULT_ENDPOINTS = [
-    "https://portal.iphan.gov.br/geoserver/SICG/ows",
-    "http://portal.iphan.gov.br/geoserver/SICG/ows",
-    "http://portal.iphan.gov.br/geoserver/wfs",
+    "https://geoserver.iphan.gov.br/geoserver/ows",
+    "https://geoserver.iphan.gov.br/geoserver/SICG/ows",
+    "https://geoserver.iphan.gov.br/geoserver/wfs",
 ]
 
 
