@@ -1,0 +1,35 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "id": "sitios.sample.1",
+      "geometry": {"type": "Point", "coordinates": [-42.489848, -8.784657]},
+      "properties": {
+        "id_bem": 1001,
+        "identificacao_bem": "Registro de teste A",
+        "co_iphan": "PI2210607BAST99999",
+        "ds_classificacao": "Pré-colonial",
+        "sintese_bem": "Registro sintético usado apenas para teste automatizado do conversor.",
+        "dt_cadastro": "2026-01-01Z",
+        "imagem_url": "https://example.invalid/a.jpg",
+        "municipio": "São Raimundo Nonato"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sitios.sample.2",
+      "geometry": {"type": "Point", "coordinates": [-40.5, -9.4]},
+      "properties": {
+        "id_bem": 1002,
+        "identificacao_bem": "Registro de teste B",
+        "co_iphan": "PE2611101BAST99999",
+        "ds_classificacao": "Histórico",
+        "sintese_bem": null,
+        "dt_cadastro": "2026-02-01Z",
+        "imagem_url": "https://sicg.iphan.gov.br/sicg/images/help.gif",
+        "municipio": "Petrolina"
+      }
+    }
+  ]
+}

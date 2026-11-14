@@ -1,0 +1,4 @@
+ProxiMetria PWA / GitHub Package
+Versão: 1.0.0
+Data de preparação: 2026-11-13
+Arquitetura: cliente estático + base local compacta + GitHub Actions + WFS SICG/IPHAN
