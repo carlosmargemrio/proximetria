@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'proximetria-v1.0.0';
+const CACHE_VERSION = 'proximetria-v1.0.3';
 const CORE_CACHE = `${CACHE_VERSION}-core`;
 const DATA_CACHE = `${CACHE_VERSION}-data`;
 const TILE_CACHE = `${CACHE_VERSION}-tiles`;
