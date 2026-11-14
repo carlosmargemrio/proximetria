@@ -1,30 +1,10 @@
 {
-  "schema_version": 1,
-  "estado": "ok",
-  "fonte": "SICG/IPHAN — camada SICG:sitios",
-  "endpoint": "https://geoserver.iphan.gov.br/geoserver/ows",
-  "wfs_version": "1.0.0",
-  "ultima_consulta_utc": "2026-11-14T17:05:11Z",
-  "ultima_atualizacao_utc": "2026-11-14T17:05:11Z",
-  "total_registros": 32928,
-  "sem_coordenadas": 0,
-  "sem_municipio": 32928,
-  "com_fotografia": 0,
-  "novos_desde_ultima": 0,
-  "alterados_desde_ultima": 0,
-  "primeira_carga": true,
-  "arquivos": {
-    "sitios_brasil.json": {
-      "bytes": 7605466,
-      "sha256": "ec1e75657b7c26d9f4f3b7fad1a537d23be623116a530e68a199961a3eed4327"
-    },
-    "sitios_brasil_detalhes.json": {
-      "bytes": 12727920,
-      "sha256": "ce186d632bbadb640933473dbf37cd40dc65625987aaed796521b7447fe73159"
-    },
-    "novos_sitios.json": {
-      "bytes": 3,
-      "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
-    }
-  }
+    "fonte": "SICG/IPHAN",
+    "total_registros": 32884,
+    "sem_coordenadas": 3,
+    "sem_municipio": 54,
+    "com_fotografia": 13241,
+    "gerado_em": "2026-11-13T00:27:05.726802+00:00",
+    "versao": "62c7b1d9501df071",
+    "sha256": "62c7b1d9501df0717353f27e1625c846f98ec9c681bdae8d244d4060b128584f"
 }
