@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.DS_Store
+Thumbs.db
+
+# O GeoJSON bruto pode ter dezenas de MiB. O repositório precisa guardar apenas os derivados compactos.
+resultado_imagens*.json
+resultado_*.geojson
+*.tmp
