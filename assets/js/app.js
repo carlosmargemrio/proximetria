@@ -446,10 +446,35 @@
     el.detailContent.innerHTML = '<p>Carregando detalhes…</p>';
     el.detailDialog.showModal();
 
+    let fotografiasPromise = null;
+
+function carregarFotografias() {
+    if (!fotografiasPromise) {
+        fotografiasPromise = fetchJson(
+            './dados/fotografias_sicg.json'
+        ).catch(error => {
+            console.warn(
+                'Base fotográfica indisponível:', error
+            );
+
+            fotografiasPromise = null;
+            return {};
+        });
+    }
+
+    return fotografiasPromise;
+}
+    
+
     try {
       if (!state.details) state.details = await fetchJson(state.config.detailsUrl, { cache: 'no-cache' });
       const detail = state.details[key] || {};
-      const imageUrl = detail.imagem_url || '';
+      const fotografias = await carregarFotografias();
+
+const imageUrl =
+    detail.imagem_url ||
+    fotografias[String(site.id_bem)] ||
+    '';
       el.detailContent.innerHTML = `
         <dl>
           <dt>Código IPHAN</dt><dd>${escapeHtml(site.co_iphan || '—')}</dd>
