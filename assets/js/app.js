@@ -1199,24 +1199,26 @@
   }
 
   function renderRadius(km) {
-    clearRadius();
+  clearRadius();
 
-    state.radiusCircle = L.circle(
-      [state.userLat, state.userLon],
-      {
-        radius: km * 1000,
-        color: '#67a7e8',
-        weight: 2,
-        fillOpacity: .06
-      }
-    ).addTo(state.map);
-  }
+  state.radiusCircle = L.circle(
+    [state.userLat, state.userLon],
+    {
+      radius: km * 1000,
+      color: '#67a7e8',
+      weight: 2,
+      fillColor: '#67a7e8',
+      fillOpacity: 0.06,
 
-  function clearRadius() {
-    if (state.radiusCircle) {
-      state.map.removeLayer(state.radiusCircle);
-      state.radiusCircle = null;
+      // Impede a interceptação dos cliques
+      interactive: false
+
     }
+  ).addTo(state.map);
+
+  // Mantém o círculo atrás dos marcadores
+  state.radiusCircle.bringToBack();
+  }
   }
 
   // ==========================================
