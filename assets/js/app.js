@@ -1,6 +1,8 @@
 (() => {
   'use strict';
 
+  const VERSION = '1.0.7';
+
   const state = {
     config: null,
     sites: [],
@@ -16,12 +18,16 @@
     radiusCircle: null,
     results: [],
     page: 1,
+    mode: null,
+    searchText: '',
     userLat: null,
     userLon: null,
     worker: null,
     workerReady: false,
     pendingRequests: new Map(),
     requestSeq: 0,
+    querySeq: 0,
+    imageSeq: 0,
     pickOnMap: false,
     deferredInstall: null
   };
@@ -31,10 +37,13 @@
 
   document.addEventListener('DOMContentLoaded', boot);
 
+  // ==========================================
   // INICIALIZACAO
+  // ==========================================
 
   async function boot() {
     cacheElements();
+    configureInterface();
     initTheme();
     initNetworkStatus();
     initPwaInstall();
@@ -53,7 +62,7 @@
 
       carregarFotografias().then(renderDatasetStatus);
 
-      console.info('ProxiMetria v1.0.4');
+      console.info(`ProxiMetria v${VERSION}`);
 
     } catch (error) {
       console.error(error);
@@ -79,12 +88,51 @@
     });
   }
 
+  function configureInterface() {
+    const field = el.coordInput.closest('.field');
+
+    const label = field?.querySelector('span');
+    const help = field?.querySelector('small');
+
+    if (label) {
+      label.textContent = 'Coordenadas ou pesquisa';
+    }
+
+    if (help) {
+      help.textContent =
+        'Informe coordenadas decimais, UTM, nome do sítio, ' +
+        'município, código IPHAN ou ID SICG.';
+    }
+
+    el.coordInput.placeholder =
+      'Coordenadas, sítio ou município';
+
+    el.coordInput.spellcheck = false;
+
+    el.calculateButton.textContent = 'Pesquisar / calcular';
+
+    // Permite selecionar o arquivo original pelo gerenciador
+    // de arquivos, sem restringir ao seletor de fotografias.
+
+    el.imageInput.removeAttribute('accept');
+
+    el.imageStatus.textContent =
+      'Selecione a fotografia original. No celular, prefira ' +
+      'o gerenciador Arquivos. A imagem não será enviada.';
+  }
+
   function bindEvents() {
     el.themeButton.addEventListener('click', toggleTheme);
-    el.calculateButton.addEventListener('click', calculateFromInput);
+
+    el.calculateButton.addEventListener(
+      'click', calculateFromInput
+    );
 
     el.coordInput.addEventListener('keydown', e => {
-      if (e.key === 'Enter') calculateFromInput();
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        calculateFromInput();
+      }
     });
 
     el.pickMapButton.addEventListener('click', () => {
@@ -94,29 +142,45 @@
         ? 'Clique no mapa…'
         : 'Escolher no mapa';
 
-      el.pickMapButton.classList.toggle('primary', state.pickOnMap);
+      el.pickMapButton.classList.toggle(
+        'primary', state.pickOnMap
+      );
 
       showToast(state.pickOnMap
         ? 'Clique no mapa para definir o ponto da consulta.'
         : 'Seleção no mapa cancelada.');
     });
 
-    el.useLocationButton.addEventListener('click', useDeviceLocation);
-    el.imageInput.addEventListener('change', handleImageExif);
+    el.useLocationButton.addEventListener(
+      'click', useDeviceLocation
+    );
+
+    el.imageInput.addEventListener(
+      'change', handleImageExif
+    );
+
+    el.imageInput.addEventListener('click', () => {
+      el.imageInput.value = '';
+    });
+
     el.csvButton.addEventListener('click', exportCsv);
 
     el.ufFilter.addEventListener('change', () => {
-      if (Number.isFinite(state.userLat) &&
-          Number.isFinite(state.userLon)) {
+      if (state.mode === 'text') {
+        runTextSearch(state.searchText);
+      } else if (validPoint(state.userLat, state.userLon)) {
         runCalculation(state.userLat, state.userLon);
       }
     });
   }
 
-  // TEMA
+  // ==========================================
+  // TEMA E CONEXAO
+  // ==========================================
 
   function initTheme() {
     const saved = localStorage.getItem('proximetria-theme');
+
     const preferred = window.matchMedia(
       '(prefers-color-scheme: light)'
     ).matches ? 'light' : 'dark';
@@ -125,15 +189,13 @@
   }
 
   function toggleTheme() {
-    const next = document.documentElement.dataset.theme === 'light'
-      ? 'dark'
-      : 'light';
+    const next =
+      document.documentElement.dataset.theme === 'light'
+        ? 'dark' : 'light';
 
     document.documentElement.dataset.theme = next;
     localStorage.setItem('proximetria-theme', next);
   }
-
-  // CONEXAO
 
   function initNetworkStatus() {
     const refresh = () => {
@@ -148,8 +210,6 @@
     window.addEventListener('offline', refresh);
     refresh();
   }
-
-  // INSTALACAO PWA
 
   function initPwaInstall() {
     window.addEventListener('beforeinstallprompt', event => {
@@ -192,7 +252,9 @@
     }
   }
 
+  // ==========================================
   // MAPA
+  // ==========================================
 
   function initMap() {
     state.map = L.map('map', {
@@ -231,20 +293,47 @@
     state.map.on('click', event => {
       if (!state.pickOnMap) return;
 
-      state.pickOnMap = false;
-      el.pickMapButton.textContent = 'Escolher no mapa';
-      el.pickMapButton.classList.remove('primary');
+      resetMapPick();
 
       const { lat, lng } = event.latlng;
-
-      el.coordInput.value =
-        `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
-
       runCalculation(lat, lng);
     });
   }
 
-  // BASE DE DADOS
+  function resetMapPick() {
+    state.pickOnMap = false;
+    el.pickMapButton.textContent = 'Escolher no mapa';
+    el.pickMapButton.classList.remove('primary');
+  }
+
+  function validPoint(lat, lon) {
+    return Number.isFinite(lat) &&
+      Number.isFinite(lon) &&
+      lat >= -90 && lat <= 90 &&
+      lon >= -180 && lon <= 180;
+  }
+
+  function sitePoint(site) {
+    const coord = site?.coordinates;
+
+    if (!Array.isArray(coord) || coord.length < 2) {
+      return null;
+    }
+
+    if (coord[0] == null || coord[1] == null ||
+        coord[0] === '' || coord[1] === '') {
+      return null;
+    }
+
+    const lon = Number(coord[0]);
+    const lat = Number(coord[1]);
+
+    return validPoint(lat, lon) ? { lat, lon } : null;
+  }
+
+  // ==========================================
+  // BASE NACIONAL
+  // ==========================================
 
   async function loadDataset() {
     const [meta, sites] = await Promise.all([
@@ -306,7 +395,8 @@
 
     el.datasetStatus.innerHTML = `
       <strong>Base:</strong> ${total} registros ·
-      ${count.toLocaleString('pt-BR')} com referência fotográfica${note}
+      ${count.toLocaleString('pt-BR')}
+      com referência fotográfica${note}
       <br>
       <strong>Atualização:</strong>
       ${escapeHtml(updated || 'não informada')}
@@ -319,13 +409,14 @@
       ${escapeHtml(error.message || String(error))}
     `;
 
-    el.emptyState.innerHTML = `
-      <strong>Não foi possível carregar os dados.</strong>
-      <span>Verifique a conexão ou a atualização inicial da base.</span>
-    `;
+    el.emptyState.innerHTML =
+      '<strong>Não foi possível carregar os dados.</strong>' +
+      '<span>Verifique a conexão ou a atualização da base.</span>';
   }
 
+  // ==========================================
   // WEB WORKER
+  // ==========================================
 
   function initWorker() {
     state.worker = new Worker('./assets/js/distance-worker.js');
@@ -348,41 +439,60 @@
       }
     };
 
-    state.worker.onerror = e => console.error('Worker:', e);
+    state.worker.onerror = error => {
+      console.error('Worker:', error);
+    };
 
     state.worker.postMessage({
       type: 'init',
-      points: state.sites.map((s, i) => ({
-        i,
-        lon: Number(s.coordinates?.[0]),
-        lat: Number(s.coordinates?.[1]),
-        uf: s.uf || ''
-      }))
+      points: state.sites.map((site, i) => {
+        const point = sitePoint(site);
+
+        return {
+          i,
+          lat: point?.lat ?? NaN,
+          lon: point?.lon ?? NaN,
+          uf: site.uf || ''
+        };
+      })
     });
   }
 
-  // COORDENADAS
+  // ==========================================
+  // INTERPRETACAO DE COORDENADAS
+  // ==========================================
 
   function parseCoordinateInput(value) {
-    const text = String(value || '').trim();
+    const text = String(value || '')
+      .replace(/[−–—]/g, '-')
+      .trim();
+
     if (!text) return null;
 
+    // Latitude e longitude separadas por vírgula,
+    // ponto e vírgula ou espaço.
+
     const decimal = text.match(
-      /^\s*(-?\d{1,2}(?:[.,]\d+)?)\s*[,;]\s*(-?\d{1,3}(?:[.,]\d+)?)\s*$/
+      /^([+-]?\d{1,3}(?:[.,]\d+)?)\s*[,;]\s*([+-]?\d{1,3}(?:[.,]\d+)?)$/
+    ) || text.match(
+      /^([+-]?\d{1,3}(?:[.,]\d+)?)\s+([+-]?\d{1,3}(?:[.,]\d+)?)$/
     );
 
     if (decimal) {
       const lat = Number(decimal[1].replace(',', '.'));
       const lon = Number(decimal[2].replace(',', '.'));
 
-      if (lat >= -90 && lat <= 90 &&
-          lon >= -180 && lon <= 180) {
+      if (validPoint(lat, lon)) {
         return { lat, lon, kind: 'decimal' };
       }
+
+      return null;
     }
 
+    // Coordenadas UTM.
+
     const utm = text.toUpperCase().replace(/,/g, '.').match(
-      /^\s*(\d{1,2})([C-HJ-NP-X]|N|S)?\s+([0-9]+(?:\.\d+)?)\s+([0-9]+(?:\.\d+)?)\s*$/
+      /^(\d{1,2})([C-HJ-NP-X])?\s+([0-9]+(?:\.\d+)?)\s+([0-9]+(?:\.\d+)?)$/
     );
 
     if (utm) {
@@ -391,13 +501,19 @@
       const easting = Number(utm[3]);
       const northing = Number(utm[4]);
 
-      if (zone < 1 || zone > 60) return null;
+      if (zone < 1 || zone > 60 ||
+          easting < 100000 || easting > 900000 ||
+          northing < 0 || northing > 10000000) {
+        return null;
+      }
 
       let south = true;
 
-      if (suffix === 'N') south = false;
-      else if (suffix === 'S') south = true;
-      else if (suffix) {
+      if (suffix === 'N') {
+        south = false;
+      } else if (suffix === 'S') {
+        south = true;
+      } else if (suffix) {
         south = suffix.charCodeAt(0) < 'N'.charCodeAt(0);
       }
 
@@ -405,44 +521,217 @@
         `+proj=utm +zone=${zone} ${south ? '+south' : ''} ` +
         '+datum=WGS84 +units=m +no_defs';
 
-      const [lon, lat] = proj4(
-        src,
-        'EPSG:4326',
-        [easting, northing]
-      );
+      try {
+        const [lon, lat] = proj4(
+          src, 'EPSG:4326', [easting, northing]
+        );
 
-      if (Number.isFinite(lat) && Number.isFinite(lon)) {
-        return { lat, lon, kind: 'utm' };
+        if (validPoint(lat, lon)) {
+          return { lat, lon, kind: 'utm' };
+        }
+
+      } catch (error) {
+        console.warn('Conversão UTM:', error);
       }
     }
 
     return null;
   }
 
-  function calculateFromInput() {
-    const parsed = parseCoordinateInput(el.coordInput.value);
+  function looksLikeCoordinates(value) {
+    const text = String(value).trim();
 
-    if (!parsed) {
+    if (/^\d+$/.test(text)) return false;
+
+    return /^[+\-−–—\d.,;\s]+$/.test(text) ||
+      /^\d{1,2}[a-z]?\s+[\d.,]+\s+[\d.,]+$/i.test(text);
+  }
+
+  // ==========================================
+  // PESQUISA TEXTUAL
+  // ==========================================
+
+  function norm(value) {
+    return String(value ?? '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, ' ');
+  }
+
+  function municipio(site, detail = {}) {
+    return site.municipio ||
+      site.municipio_cadastral ||
+      detail.municipio ||
+      detail.municipio_cadastral ||
+      site.municipio_espacial ||
+      '';
+  }
+
+  function matchesSite(site, query) {
+    const q = norm(query);
+    const name = norm(site.identificacao_bem);
+
+    const places = [
+      site.municipio,
+      site.municipio_cadastral,
+      site.municipio_espacial
+    ].map(norm).filter(Boolean);
+
+    const code = norm(site.co_iphan);
+    const id = norm(site.id_bem);
+
+    const includes = (value, term) =>
+      Boolean(term) &&
+      term.split(' ').every(t => value.includes(t));
+
+    // Número isolado: pesquisa por ID SICG.
+
+    if (/^\d+$/.test(q)) {
+      return id === q;
+    }
+
+    // Pesquisa direcionada por atributo.
+
+    const prefix = q.match(
+      /^(municipio|mun|sitio|nome|id|codigo)\s*:\s*(.*)$/
+    );
+
+    if (prefix) {
+      const [, field, term] = prefix;
+
+      if (!term) return false;
+
+      if (field === 'id') return id === term;
+
+      if (field === 'codigo') {
+        return code.includes(term);
+      }
+
+      if (['municipio', 'mun'].includes(field)) {
+        return places.some(p => includes(p, term));
+      }
+
+      return includes(name, term);
+    }
+
+    // Pesquisa geral, sem distinção de acentos.
+
+    return includes(
+      [name, ...places, code, id].join(' '),
+      q
+    );
+  }
+
+  function calculateFromInput() {
+    const value = el.coordInput.value.trim();
+
+    if (!value) {
       showToast(
-        'Formato inválido. Use latitude, longitude ou UTM, ' +
-        'por exemplo: 23K 797000 7995000.'
+        'Informe coordenadas, nome do sítio ou código cadastral.'
       );
       return;
     }
 
-    runCalculation(parsed.lat, parsed.lon);
+    state.imageSeq++;
+
+    const parsed = parseCoordinateInput(value);
+
+    if (parsed) {
+      runCalculation(parsed.lat, parsed.lon);
+      return;
+    }
+
+    if (looksLikeCoordinates(value)) {
+      showToast(
+        'Coordenadas inválidas. Confira os valores e o formato.'
+      );
+      return;
+    }
+
+    runTextSearch(value);
   }
 
-  // CALCULO DE DISTANCIAS
-
-  async function runCalculation(lat, lon) {
+  function runTextSearch(query) {
     if (!state.sites.length) {
       showToast('A base de sítios está vazia.');
       return;
     }
 
+    state.querySeq++;
+    state.imageSeq++;
+
+    resetMapPick();
+
+    state.mode = 'text';
+    state.searchText = query;
+    state.userLat = null;
+    state.userLon = null;
+    state.page = 1;
+
+    if (state.userMarker) {
+      state.map.removeLayer(state.userMarker);
+      state.userMarker = null;
+    }
+
+    clearRadius();
+
+    const uf = el.ufFilter.value;
+
+    state.results = state.sites
+      .filter(site =>
+        (!uf || site.uf === uf) &&
+        matchesSite(site, query)
+      )
+      .sort((a, b) =>
+        String(a.identificacao_bem || '').localeCompare(
+          String(b.identificacao_bem || ''),
+          'pt-BR',
+          { sensitivity: 'base', numeric: true }
+        )
+      )
+      .map(site => ({
+        site,
+        km: null
+      }));
+
+    el.coordInput.value = query;
+    el.calculateButton.disabled = false;
+    el.calculateButton.textContent = 'Pesquisar / calcular';
+
+    renderResults();
+
+    if (!state.results.length) {
+      showToast('Nenhum sítio corresponde à pesquisa.');
+    }
+  }
+
+  // ==========================================
+  // CALCULO DE DISTANCIAS
+  // ==========================================
+
+  async function runCalculation(lat, lon) {
+    if (!validPoint(lat, lon)) {
+      showToast('Coordenadas fora dos limites válidos.');
+      return;
+    }
+
+    if (!state.sites.length) {
+      showToast('A base de sítios está vazia.');
+      return;
+    }
+
+    state.imageSeq++;
+
+    const token = ++state.querySeq;
+
+    resetMapPick();
+
+    state.mode = 'spatial';
     state.userLat = lat;
     state.userLon = lon;
+    state.searchText = '';
 
     el.coordInput.value =
       `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
@@ -455,13 +744,20 @@
 
       const radiusKm = radiusRaw === ''
         ? null
-        : Math.max(0, Number(radiusRaw));
+        : Number(radiusRaw);
+
+      if (radiusKm !== null &&
+          (!Number.isFinite(radiusKm) || radiusKm < 0)) {
+        throw new Error('Raio máximo inválido.');
+      }
 
       const uf = el.ufFilter.value;
 
       const values = await calculateDistances(
         lat, lon, radiusKm, uf
       );
+
+      if (token !== state.querySeq) return;
 
       state.results = values.map(v => ({
         site: state.sites[v.i],
@@ -473,7 +769,7 @@
       renderUserPoint();
       renderResults();
 
-      if (radiusKm !== null && Number.isFinite(radiusKm)) {
+      if (radiusKm !== null) {
         renderRadius(radiusKm);
       } else {
         clearRadius();
@@ -481,11 +777,18 @@
 
     } catch (error) {
       console.error(error);
-      showToast('Não foi possível concluir o cálculo.');
+
+      if (token === state.querySeq) {
+        showToast(
+          error.message || 'Não foi possível concluir o cálculo.'
+        );
+      }
 
     } finally {
-      el.calculateButton.disabled = false;
-      el.calculateButton.textContent = 'Calcular distâncias';
+      if (token === state.querySeq) {
+        el.calculateButton.disabled = false;
+        el.calculateButton.textContent = 'Pesquisar / calcular';
+      }
     }
   }
 
@@ -521,7 +824,9 @@
     });
   }
 
-  // RESULTADOS
+  // ==========================================
+  // TABELA DE RESULTADOS
+  // ==========================================
 
   function renderResults() {
     const rowsPerPage = Number(state.config.rowsPerPage || 50);
@@ -538,43 +843,76 @@
 
     pageItems.forEach((entry, offset) => {
       const site = entry.site;
-      const meters = entry.km * 1000;
-      const near = meters <= margin;
+      const hasDistance = Number.isFinite(entry.km);
+      const meters = hasDistance ? entry.km * 1000 : null;
+      const near = hasDistance && meters <= margin;
       const tr = document.createElement('tr');
 
       const sicgUrl = site.id_bem
         ? `${state.config.sicgDetailBaseUrl}${encodeURIComponent(site.id_bem)}`
         : '';
 
+      const distanceText = hasDistance
+        ? formatDistance(meters)
+        : '—';
+
+      const proximity = hasDistance
+        ? (near ? `≤ ${margin} m` : 'Não')
+        : '—';
+
       tr.innerHTML = `
         <td data-label="#">${start + offset + 1}</td>
-        <td data-label="IPHAN">${escapeHtml(site.co_iphan || '—')}</td>
+
+        <td data-label="IPHAN">
+          ${escapeHtml(site.co_iphan || '—')}
+        </td>
+
         <td data-label="Sítio">
-          <strong>${escapeHtml(site.identificacao_bem || 'Sem identificação')}</strong>
+          <strong>${escapeHtml(
+            site.identificacao_bem || 'Sem identificação'
+          )}</strong>
         </td>
+
         <td data-label="Município/UF">
-          ${escapeHtml([site.municipio, site.uf].filter(Boolean).join(' / ') || '—')}
+          ${escapeHtml(
+            [municipio(site), site.uf]
+              .filter(Boolean).join(' / ') || '—'
+          )}
         </td>
+
         <td data-label="Distância" class="distance">
-          ${formatDistance(meters)}
+          ${distanceText}
         </td>
+
         <td data-label="Proximidade"
             class="${near ? 'proximity-yes' : 'proximity-no'}">
-          ${near ? `≤ ${margin} m` : 'Não'}
+          ${proximity}
         </td>
+
         <td data-label="Ações">
           <div class="result-actions">
+
             <button class="button ghost compact"
                     type="button"
                     data-detail-key="${escapeAttr(siteKey(site))}">
               Ficha
             </button>
+
             ${sicgUrl ? `
               <a class="button secondary compact"
                  href="${escapeAttr(sicgUrl)}"
                  target="_blank"
                  rel="noopener noreferrer">SICG</a>
             ` : ''}
+
+            ${state.mode === 'text' && sitePoint(site) ? `
+              <button class="button ghost compact"
+                      type="button"
+                      data-reference-key="${escapeAttr(siteKey(site))}">
+                Usar como referência
+              </button>
+            ` : ''}
+
           </div>
         </td>
       `;
@@ -582,9 +920,19 @@
       el.resultsBody.appendChild(tr);
     });
 
-    el.resultsBody.querySelectorAll('[data-detail-key]').forEach(button => {
+    el.resultsBody.querySelectorAll(
+      '[data-detail-key]'
+    ).forEach(button => {
       button.addEventListener('click', () => {
         openDetails(button.dataset.detailKey);
+      });
+    });
+
+    el.resultsBody.querySelectorAll(
+      '[data-reference-key]'
+    ).forEach(button => {
+      button.addEventListener('click', () => {
+        useSiteAsReference(button.dataset.referenceKey);
       });
     });
 
@@ -593,12 +941,52 @@
     el.pagination.hidden = total === 0;
     el.csvButton.disabled = total === 0;
 
-    el.resultSummary.textContent =
-      `${total.toLocaleString('pt-BR')} sítio(s) encontrados · ` +
-      `ponto ${state.userLat.toFixed(6)}, ${state.userLon.toFixed(6)}`;
+    if (!total) {
+      el.emptyState.innerHTML =
+        '<strong>Nenhum sítio encontrado.</strong>' +
+        '<span>Revise a pesquisa ou os filtros utilizados.</span>';
+    }
+
+    if (state.mode === 'text') {
+      el.resultSummary.textContent =
+        `${total.toLocaleString('pt-BR')} sítio(s) encontrados · ` +
+        `Pesquisa: ${state.searchText} · Sem referência espacial`;
+
+      el.mapHint.textContent =
+        'Pesquisa cadastral. Selecione um sítio para utilizá-lo ' +
+        'como referência de distância.';
+
+    } else {
+      el.resultSummary.textContent =
+        `${total.toLocaleString('pt-BR')} sítio(s) encontrados · ` +
+        `ponto ${state.userLat.toFixed(6)}, ${state.userLon.toFixed(6)}`;
+
+      el.mapHint.textContent =
+        'Os marcadores exibem apenas os resultados da página atual.';
+    }
 
     renderPagination(totalPages);
     renderMapPage(pageItems);
+  }
+
+  function useSiteAsReference(key) {
+    const site = state.sites.find(s => siteKey(s) === key);
+    const point = sitePoint(site);
+
+    if (!point) {
+      showToast('Este sítio não possui coordenadas válidas.');
+      return;
+    }
+
+    if (el.detailDialog.open) {
+      el.detailDialog.close();
+    }
+
+    state.map.closePopup();
+
+    // A nova consulta mantém os filtros de UF e raio definidos.
+
+    runCalculation(point.lat, point.lon);
   }
 
   function renderPagination(totalPages) {
@@ -632,7 +1020,9 @@
     return button;
   }
 
-  // PONTO DE CONSULTA
+  // ==========================================
+  // MARCADOR DO PONTO DE CONSULTA
+  // ==========================================
 
   function renderUserPoint() {
     const point = [state.userLat, state.userLon];
@@ -650,24 +1040,31 @@
         .bindPopup('<strong>Ponto da consulta</strong>');
     }
 
-    state.map.setView(point, Math.max(state.map.getZoom(), 9));
+    state.map.setView(
+      point, Math.max(state.map.getZoom(), 9)
+    );
   }
 
-  // POPUPS COM FOTOGRAFIA E SINTESE
+  // ==========================================
+  // MARCADORES E POPUPS
+  // ==========================================
 
   function renderMapPage(pageItems) {
     state.markers.clearLayers();
 
-    const bounds = L.latLngBounds([
-      [state.userLat, state.userLon]
-    ]);
+    const bounds = L.latLngBounds([]);
+
+    if (validPoint(state.userLat, state.userLon)) {
+      bounds.extend([state.userLat, state.userLon]);
+    }
 
     for (const entry of pageItems) {
       const site = entry.site;
-      const [lon, lat] = (site.coordinates || []).map(Number);
+      const point = sitePoint(site);
 
-      if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+      if (!point) continue;
 
+      const { lat, lon } = point;
       const key = siteKey(site);
 
       const marker = L.circleMarker([lat, lon], {
@@ -681,15 +1078,21 @@
       const popup = document.createElement('div');
       popup.className = 'pm-popup';
 
+      const distance = Number.isFinite(entry.km)
+        ? `<br>${formatDistance(entry.km * 1000)}`
+        : '';
+
       popup.innerHTML = `
-        <strong>${escapeHtml(site.identificacao_bem || 'Sítio arqueológico')}</strong>
+        <strong>${escapeHtml(
+          site.identificacao_bem || 'Sítio arqueológico'
+        )}</strong>
         <br>${escapeHtml(site.co_iphan || '')}
-        <br>${formatDistance(entry.km * 1000)}
+        ${distance}
       `;
 
       const photoSlot = document.createElement('div');
-
       const summary = document.createElement('div');
+
       summary.className = 'pm-popup-sintese';
 
       popup.append(
@@ -697,6 +1100,15 @@
         summary,
         makeButton('Ficha completa', () => openDetails(key))
       );
+
+      if (state.mode === 'text') {
+        popup.append(
+          makeButton(
+            'Usar como referência',
+            () => useSiteAsReference(key)
+          )
+        );
+      }
 
       marker.bindPopup(popup, {
         maxWidth: 300,
@@ -726,6 +1138,7 @@
           if (!active() || shown || !url) return;
 
           shown = true;
+
           exibirFoto(photoSlot, url, true, update);
           update();
         };
@@ -747,15 +1160,16 @@
           const detail = data?.[key] || {};
 
           const text = String(detail.sintese_bem || '')
-            .replace(/\s+/g, ' ')
-            .trim();
+            .replace(/\s+/g, ' ').trim();
 
           const preview = text.length > 220
             ? text.slice(0, 220).trimEnd() + '…'
             : text;
 
           summary.innerHTML =
-            `<strong>Síntese</strong>${escapeHtml(preview || 'Não informada pelo SICG.')}`;
+            `<strong>Síntese</strong>${escapeHtml(
+              preview || 'Não informada pelo SICG.'
+            )}`;
 
           showPhoto(detail.imagem_url);
           update();
@@ -776,15 +1190,13 @@
       bounds.extend([lat, lon]);
     }
 
-    if (pageItems.length && bounds.isValid()) {
+    if (bounds.isValid()) {
       state.map.fitBounds(bounds, {
         padding: [28, 28],
         maxZoom: 12
       });
     }
   }
-
-  // RAIO
 
   function renderRadius(km) {
     clearRadius();
@@ -807,7 +1219,9 @@
     }
   }
 
-  // BASE FOTOGRAFICA
+  // ==========================================
+  // BASE FOTOGRAFICA DO SICG
+  // ==========================================
 
   function normalizarFoto(value) {
     if (typeof value !== 'string' || !value.trim()) return '';
@@ -822,6 +1236,7 @@
       }
 
       url.protocol = 'https:';
+
       return url.href;
 
     } catch {
@@ -877,6 +1292,8 @@
     }).catch(error => {
       state.photosUnavailable = true;
       console.warn('Base fotográfica indisponível:', error);
+      renderDatasetStatus();
+
       return Object.create(null);
 
     }).finally(() => {
@@ -894,6 +1311,11 @@
         state.config.detailsUrl,
         { cache: 'no-cache' }
       ).then(data => {
+        if (!data || typeof data !== 'object' ||
+            Array.isArray(data)) {
+          throw new Error('Base de detalhes inválida.');
+        }
+
         state.details = data;
         return data;
 
@@ -905,23 +1327,15 @@
     return state.detailsPromise;
   }
 
-  async function obterFoto(site, detail = {}) {
-    const official = normalizarFoto(detail.imagem_url);
-    if (official) return official;
-
-    const photos = await carregarFotografias();
-
-    return photos[String(site.id_bem ?? '').trim()] || '';
-  }
-
-  // FOTOGRAFIA DO POPUP
-
-  function exibirFoto(container, url, compact = false, onLayout = () => {}) {
+  function exibirFoto(
+    container, url, compact = false, onLayout = () => {}
+  ) {
     if (!container || !url) return;
 
     container.replaceChildren();
 
     const link = document.createElement('a');
+
     link.href = url;
     link.target = '_blank';
     link.rel = 'noopener noreferrer';
@@ -961,10 +1375,13 @@
     img.src = url;
   }
 
-  // FICHA ARQUEOLOGICA RESPONSIVA V1.0.4
+  // ==========================================
+  // FICHA ARQUEOLOGICA RESPONSIVA
+  // ==========================================
 
   async function openDetails(key) {
     const site = state.sites.find(s => siteKey(s) === key);
+
     if (!site) return;
 
     el.detailTitle.textContent =
@@ -972,23 +1389,35 @@
 
     el.detailContent.innerHTML = `
       <div class="pm-ficha">
+
         <div class="pm-topo">
+
           <dl class="pm-campos"></dl>
+
           <figure class="pm-foto">
+
             <div class="pm-foto-quadro" aria-live="polite">
               <small>Consultando fotografia…</small>
             </div>
+
             <a hidden target="_blank" rel="noopener noreferrer">
               Abrir fotografia original ↗
             </a>
+
           </figure>
+
         </div>
+
         <div class="pm-sintese">
+
           <strong>Síntese</strong>
+
           <div class="pm-sintese-texto" tabindex="0">
             Carregando síntese…
           </div>
+
         </div>
+
       </div>
     `;
 
@@ -1012,9 +1441,10 @@
       const rows = [
         ['Código IPHAN', site.co_iphan],
         ['ID SICG', site.id_bem],
-        ['Município', site.municipio || detail.municipio],
+        ['Município', municipio(site, detail)],
         ['UF', site.uf],
-        ['Classificação', site.ds_classificacao || detail.ds_classificacao],
+        ['Classificação',
+          site.ds_classificacao || detail.ds_classificacao],
         ['Cadastro', site.dt_cadastro],
         ['Logradouro', detail.no_logradouro],
         ['Coordenadas', formatCoordinates(site.coordinates)]
@@ -1046,9 +1476,7 @@
       img.decoding = 'async';
 
       img.addEventListener('load', () => {
-        if (active()) {
-          frame.replaceChildren(img);
-        }
+        if (active()) frame.replaceChildren(img);
       }, { once: true });
 
       img.addEventListener('error', () => {
@@ -1069,14 +1497,10 @@
 
     el.detailContent.scrollTop = 0;
 
-    // Utiliza imediatamente a fotografia em memória
-
     showPhoto(
       normalizarFoto(detail.imagem_url) ||
       state.photos?.[id]
     );
-
-    // Consulta dos detalhes sem bloquear a fotografia
 
     const detailsTask = carregarDetalhes().then(data => {
       if (!active()) return;
@@ -1098,18 +1522,11 @@
       }
     });
 
-    // Consulta independente da base fotográfica
-
     const photosTask = carregarFotografias().then(photos => {
       showPhoto(photos[id]);
     });
 
-    await Promise.allSettled([
-      detailsTask,
-      photosTask
-    ]);
-
-    // Sem fotografia, os campos ocupam toda a largura
+    await Promise.allSettled([detailsTask, photosTask]);
 
     if (active() && !displayedUrl) {
       if (state.photosUnavailable) {
@@ -1121,8 +1538,6 @@
     }
   }
 
-  // IDENTIFICADOR
-
   function siteKey(site) {
     if (site?.id_bem !== null &&
         site?.id_bem !== undefined &&
@@ -1130,12 +1545,16 @@
       return String(site.id_bem);
     }
 
-    if (site?.co_iphan) return `co:${site.co_iphan}`;
+    if (site?.co_iphan) {
+      return `co:${site.co_iphan}`;
+    }
 
     return `coord:${site?.coordinates?.join(',') || ''}:${site?.identificacao_bem || ''}`;
   }
 
+  // ==========================================
   // GEOLOCALIZACAO
+  // ==========================================
 
   function useDeviceLocation() {
     if (!navigator.geolocation) {
@@ -1150,9 +1569,6 @@
 
       const { latitude, longitude, accuracy } = pos.coords;
 
-      el.coordInput.value =
-        `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
-
       showToast(
         `Localização obtida. Precisão: ±${Math.round(accuracy)} m.`
       );
@@ -1161,7 +1577,10 @@
 
     }, err => {
       el.useLocationButton.disabled = false;
-      showToast(`Não foi possível obter a localização: ${err.message}`);
+
+      showToast(
+        `Não foi possível obter a localização: ${err.message}`
+      );
 
     }, {
       enableHighAccuracy: true,
@@ -1170,83 +1589,334 @@
     });
   }
 
-  // EXIF
+  // ==========================================
+  // NOVA LEITURA BINARIA EXIF
+  // ==========================================
 
-  function handleImageExif(event) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    el.imageStatus.textContent = 'Lendo metadados GPS…';
-
-    const reader = new FileReader();
-
-    reader.onload = () => {
-      const img = new Image();
-
-      img.onload = () => {
-        if (!window.EXIF) {
-          el.imageStatus.textContent = 'A biblioteca EXIF não foi carregada.';
-          return;
-        }
-
-        EXIF.getData(img, function () {
-          const latArr = EXIF.getTag(this, 'GPSLatitude');
-          const lonArr = EXIF.getTag(this, 'GPSLongitude');
-          const latRef = EXIF.getTag(this, 'GPSLatitudeRef');
-          const lonRef = EXIF.getTag(this, 'GPSLongitudeRef');
-
-          if (!latArr || !lonArr || !latRef || !lonRef) {
-            el.imageStatus.textContent =
-              'A imagem não contém coordenadas GPS EXIF legíveis.';
-            return;
-          }
-
-          const lat = dmsToDecimal(latArr, latRef);
-          const lon = dmsToDecimal(lonArr, lonRef);
-
-          if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
-            el.imageStatus.textContent =
-              'Não foi possível interpretar as coordenadas.';
-            return;
-          }
-
-          el.coordInput.value =
-            `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
-
-          el.imageStatus.textContent =
-            'Coordenadas extraídas. A imagem não foi enviada para nenhum servidor.';
-
-          runCalculation(lat, lon);
-        });
-      };
-
-      img.src = reader.result;
-    };
-
-    reader.readAsDataURL(file);
-  }
-
-  function dmsToDecimal(values, ref) {
-    const toNum = v => typeof v === 'number'
-      ? v
-      : v?.numerator && v?.denominator
-        ? v.numerator / v.denominator
-        : Number(v);
-
-    const d = toNum(values[0]);
-    const m = toNum(values[1]);
-    const s = toNum(values[2]);
-
-    let out = d + m / 60 + s / 3600;
-
-    if (['S', 'W'].includes(String(ref).toUpperCase())) {
-      out *= -1;
+  function fileToBuffer(file) {
+    if (typeof file.arrayBuffer === 'function') {
+      return file.arrayBuffer();
     }
 
-    return out;
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => {
+        reject(new Error('Não foi possível ler o arquivo.'));
+      };
+
+      reader.readAsArrayBuffer(file);
+    });
   }
 
-  // CSV
+  // Interpreta os diretórios TIFF utilizados pelo EXIF.
+
+  function gpsFromTiff(buffer, offset, length) {
+    const v = new DataView(buffer, offset, length);
+    const order = v.getUint16(0, false);
+
+    if (![0x4949, 0x4d4d].includes(order)) {
+      throw new Error('Cabeçalho EXIF inválido.');
+    }
+
+    const le = order === 0x4949;
+    const u16 = p => v.getUint16(p, le);
+    const u32 = p => v.getUint32(p, le);
+
+    if (u16(2) !== 42) {
+      throw new Error('Formato TIFF não suportado.');
+    }
+
+    function ifd(p) {
+      const n = u16(p);
+      const tags = new Map();
+
+      if (p + 2 + n * 12 > v.byteLength) {
+        throw new Error('Metadados EXIF incompletos.');
+      }
+
+      for (let i = 0; i < n; i++) {
+        const j = p + 2 + i * 12;
+
+        tags.set(u16(j), {
+          type: u16(j + 2),
+          count: u32(j + 4),
+          pos: j + 8
+        });
+      }
+
+      return tags;
+    }
+
+    const pointer = ifd(u32(4)).get(0x8825);
+
+    if (!pointer) return null;
+
+    if (pointer.type !== 4 || pointer.count !== 1) {
+      throw new Error('Referência GPS inválida.');
+    }
+
+    const tags = ifd(u32(pointer.pos));
+
+    const ref = t => {
+      if (!t || t.type !== 2 || t.count < 1) {
+        throw new Error('Hemisfério GPS não informado.');
+      }
+
+      return String.fromCharCode(
+        v.getUint8(t.count <= 4 ? t.pos : u32(t.pos))
+      ).toUpperCase();
+    };
+
+    const dms = t => {
+      if (!t || t.type !== 5 || t.count !== 3) {
+        throw new Error('Coordenadas GPS incompletas.');
+      }
+
+      const p = u32(t.pos);
+
+      const a = [0, 8, 16].map(i => {
+        const denominator = u32(p + i + 4);
+
+        if (!denominator) {
+          throw new Error('Denominador GPS inválido.');
+        }
+
+        return u32(p + i) / denominator;
+      });
+
+      if (a[1] >= 60 || a[2] >= 60) {
+        throw new Error('Minutos ou segundos GPS inválidos.');
+      }
+
+      return a[0] + a[1] / 60 + a[2] / 3600;
+    };
+
+    if (![1, 2, 3, 4].some(k => tags.has(k))) {
+      return null;
+    }
+
+    const ns = ref(tags.get(1));
+    const ew = ref(tags.get(3));
+
+    const lat = dms(tags.get(2));
+    const lon = dms(tags.get(4));
+
+    if (!['N', 'S'].includes(ns) ||
+        !['E', 'W'].includes(ew) ||
+        lat > 90 || lon > 180) {
+      throw new Error('Coordenadas GPS fora dos limites válidos.');
+    }
+
+    return {
+      lat: ns === 'S' ? -lat : lat,
+      lon: ew === 'W' ? -lon : lon
+    };
+  }
+
+  // Localiza o bloco EXIF sem decodificar a fotografia.
+
+  function readGpsExif(buffer) {
+    const v = new DataView(buffer);
+    const n = v.byteLength;
+
+    if (n < 8) {
+      throw new Error('Arquivo vazio ou incompleto.');
+    }
+
+    const ascii = (p, len) => String.fromCharCode(
+      ...new Uint8Array(buffer, p, len)
+    );
+
+    const parse = (p, len) => {
+      if (len >= 6 && ascii(p, 6) === 'Exif\0\0') {
+        p += 6;
+        len -= 6;
+      }
+
+      return gpsFromTiff(buffer, p, len);
+    };
+
+    // JPEG / JPG
+
+    if (v.getUint16(0) === 0xffd8) {
+      let p = 2;
+
+      while (p + 1 < n) {
+        if (v.getUint8(p++) !== 0xff) break;
+
+        while (p < n && v.getUint8(p) === 0xff) p++;
+
+        if (p >= n) break;
+
+        const marker = v.getUint8(p++);
+
+        if (marker === 0xda || marker === 0xd9) break;
+
+        if (marker === 0x01 ||
+            (marker >= 0xd0 && marker <= 0xd7)) {
+          continue;
+        }
+
+        if (p + 2 > n) break;
+
+        const len = v.getUint16(p);
+
+        if (len < 2 || p + len > n) {
+          throw new Error('Segmento JPEG incompleto.');
+        }
+
+        if (marker === 0xe1 &&
+            len >= 8 &&
+            ascii(p + 2, 6) === 'Exif\0\0') {
+
+          const gps = parse(p + 2, len - 2);
+
+          if (gps) return gps;
+        }
+
+        p += len;
+      }
+
+      return null;
+    }
+
+    // TIFF
+
+    if (['II', 'MM'].includes(ascii(0, 2))) {
+      return parse(0, n);
+    }
+
+    // PNG com bloco eXIf
+
+    if (v.getUint32(0) === 0x89504e47 &&
+        v.getUint32(4) === 0x0d0a1a0a) {
+
+      for (let p = 8; p + 12 <= n;) {
+        const len = v.getUint32(p);
+        const type = ascii(p + 4, 4);
+
+        if (len > n - p - 12) {
+          throw new Error('Arquivo PNG incompleto.');
+        }
+
+        if (type === 'eXIf') {
+          return parse(p + 8, len);
+        }
+
+        if (type === 'IEND') break;
+
+        p += len + 12;
+      }
+
+      return null;
+    }
+
+    // WebP com bloco EXIF
+
+    if (n >= 12 &&
+        ascii(0, 4) === 'RIFF' &&
+        ascii(8, 4) === 'WEBP') {
+
+      for (let p = 12; p + 8 <= n;) {
+        const len = v.getUint32(p + 4, true);
+        const type = ascii(p, 4);
+
+        if (len > n - p - 8) {
+          throw new Error('Arquivo WebP incompleto.');
+        }
+
+        if (type === 'EXIF') {
+          return parse(p + 8, len);
+        }
+
+        p += 8 + len + (len % 2);
+      }
+
+      return null;
+    }
+
+    throw new Error(
+      'Formato não suportado. Utilize JPEG, TIFF, PNG ou WebP com EXIF.'
+    );
+  }
+
+  // ==========================================
+  // PROCESSAMENTO DA FOTOGRAFIA DO USUARIO
+  // ==========================================
+
+  async function handleImageExif(event) {
+    const file = event.target.files?.[0];
+
+    if (!file) return;
+
+    const token = ++state.imageSeq;
+
+    el.imageStatus.textContent =
+      `Lendo metadados GPS de ${file.name}…`;
+
+    try {
+      const buffer = await fileToBuffer(file);
+
+      if (token !== state.imageSeq) return;
+
+      const gps = readGpsExif(buffer);
+
+      if (!gps) {
+        el.imageStatus.textContent =
+          'O arquivo recebido não contém GPS EXIF. ' +
+          'Selecione a fotografia original pelo gerenciador Arquivos. ' +
+          'A galeria ou o sistema pode ter removido a localização.';
+
+        showToast('Metadados GPS não encontrados.');
+        return;
+      }
+
+      const { lat, lon } = gps;
+
+      if (!validPoint(lat, lon)) {
+        throw new Error('Coordenadas GPS inválidas.');
+      }
+
+      el.coordInput.value =
+        `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
+
+      el.imageStatus.textContent =
+        `GPS extraído: ${lat.toFixed(6)}, ${lon.toFixed(6)}. ` +
+        'A fotografia permanece no dispositivo.';
+
+      console.info('[ProxiMetria] GPS EXIF:', {
+        arquivo: file.name,
+        tamanho: file.size,
+        latitude: lat,
+        longitude: lon
+      });
+
+      // Envia diretamente os valores numéricos ao cálculo,
+      // sem reinterpretar a caixa de entrada.
+
+      runCalculation(lat, lon);
+
+    } catch (error) {
+      if (token !== state.imageSeq) return;
+
+      console.warn('Erro na leitura EXIF:', error);
+
+      const message = error instanceof RangeError
+        ? 'Estrutura EXIF incompleta ou corrompida.'
+        : error.message || 'Erro ao interpretar os metadados.';
+
+      el.imageStatus.textContent =
+        `${message} Tente selecionar o arquivo original.`;
+
+      showToast('Não foi possível extrair o GPS da fotografia.');
+    }
+  }
+
+  // ==========================================
+  // EXPORTACAO CSV
+  // ==========================================
 
   function exportCsv() {
     if (!state.results.length) return;
@@ -1266,11 +1936,13 @@
         s.id_bem ?? '',
         s.co_iphan ?? '',
         s.identificacao_bem ?? '',
-        s.municipio ?? '',
+        municipio(s),
         s.uf ?? '',
         s.coordinates?.[0] ?? '',
         s.coordinates?.[1] ?? '',
-        (entry.km * 1000).toFixed(2)
+        Number.isFinite(entry.km)
+          ? (entry.km * 1000).toFixed(2)
+          : ''
       ].map(csvCell).join(';'));
     });
 
@@ -1283,9 +1955,10 @@
     const a = document.createElement('a');
 
     a.href = url;
-    a.download = `proximetria_${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
+    a.download =
+      `proximetria_${new Date().toISOString().slice(0, 10)}.csv`;
 
+    a.click();
     URL.revokeObjectURL(url);
   }
 
@@ -1297,19 +1970,25 @@
       : text;
   }
 
+  // ==========================================
   // FUNCOES AUXILIARES
+  // ==========================================
 
   async function fetchJson(url, options = {}) {
     const response = await fetch(url, options);
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status} ao carregar ${url}`);
+      throw new Error(
+        `HTTP ${response.status} ao carregar ${url}`
+      );
     }
 
     return response.json();
   }
 
   function formatDistance(meters) {
+    if (!Number.isFinite(meters)) return '—';
+
     if (meters < 1000) {
       return `${meters.toFixed(meters < 100 ? 1 : 0)} m`;
     }
@@ -1321,9 +2000,11 @@
   }
 
   function formatCoordinates(coord) {
-    if (!Array.isArray(coord) || coord.length < 2) return '—';
+    const point = sitePoint({ coordinates: coord });
 
-    return `${Number(coord[1]).toFixed(7)}, ${Number(coord[0]).toFixed(7)}`;
+    return point
+      ? `${point.lat.toFixed(7)}, ${point.lon.toFixed(7)}`
+      : '—';
   }
 
   function formatDateTime(value) {
@@ -1367,7 +2048,9 @@
     }, 4200);
   }
 
+  // ==========================================
   // SERVICE WORKER
+  // ==========================================
 
   async function registerServiceWorker() {
     if (!('serviceWorker' in navigator)) return;
@@ -1376,6 +2059,7 @@
       await navigator.serviceWorker.register('./sw.js', {
         scope: './'
       });
+
     } catch (error) {
       console.warn('Service Worker não registrado:', error);
     }
