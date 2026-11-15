@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.0.7';
+  const VERSION = '1.0.9';
 
   const state = {
     config: null,
@@ -1216,15 +1216,22 @@
       fillColor: '#67a7e8',
       fillOpacity: 0.06,
 
-      // Impede a interceptação dos cliques
+      // O círculo é apenas visual.
+      // Não intercepta clique ou toque nos sítios.
       interactive: false
-
     }
   ).addTo(state.map);
 
-  // Mantém o círculo atrás dos marcadores
+  // Mantém o círculo abaixo dos marcadores arqueológicos.
   state.radiusCircle.bringToBack();
-    }
+}
+
+function clearRadius() {
+  if (state.radiusCircle) {
+    state.map.removeLayer(state.radiusCircle);
+    state.radiusCircle = null;
+  }
+}
 
   // ==========================================
   // BASE FOTOGRAFICA DO SICG
