@@ -654,51 +654,64 @@
   }
 
   function runTextSearch(query) {
-    if (!state.sites.length) {
-      showToast('A base de sítios está vazia.');
-      return;
-    }
+  if (!state.sites.length) {
+    showToast('A base de sítios está vazia.');
+    return;
+  }
 
-    state.querySeq++;
-    state.imageSeq++;
+  state.querySeq++;
+  state.imageSeq++;
 
-    resetMapPick();
+  resetMapPick();
 
-    state.mode = 'text';
-    state.searchText = query;
-    state.userLat = null;
-    state.userLon = null;
-    state.page = 1;
+  state.mode = 'text';
+  state.searchText = query;
+  state.userLat = null;
+  state.userLon = null;
+  state.page = 1;
 
-    if (state.userMarker) {
-      state.map.removeLayer(state.userMarker);
-      state.userMarker = null;
-    }
+  // Remove o ponto de referência anterior
+  if (state.userMarker) {
+    state.map.removeLayer(state.userMarker);
+    state.userMarker = null;
+  }
 
-    function renderRadius(km) {
+  // Remove também um eventual círculo de raio anterior
   clearRadius();
 
-  state.radiusCircle = L.circle(
-    [state.userLat, state.userLon],
-    {
-      radius: km * 1000,
-      color: '#67a7e8',
-      weight: 2,
-      fillColor: '#67a7e8',
-      fillOpacity: 0.06,
+  const uf = el.ufFilter.value;
 
-      // Impede a interceptação dos cliques
-      interactive: false
+  state.results = state.sites
+    .filter(site =>
+      (!uf || site.uf === uf) &&
+      matchesSite(site, query)
+    )
+    .sort((a, b) =>
+      String(a.identificacao_bem || '').localeCompare(
+        String(b.identificacao_bem || ''),
+        'pt-BR',
+        {
+          sensitivity: 'base',
+          numeric: true
+        }
+      )
+    )
+    .map(site => ({
+      site,
+      km: null
+    }));
 
-    }
-  ).addTo(state.map);
+  el.coordInput.value = query;
 
-  // Mantém o círculo atrás dos marcadores
-  state.radiusCircle.bringToBack();
-}
+  el.calculateButton.disabled = false;
+  el.calculateButton.textContent = 'Pesquisar / calcular';
 
-    
+  renderResults();
+
+  if (!state.results.length) {
+    showToast('Nenhum sítio corresponde à pesquisa.');
   }
+}
 
   // ==========================================
   // CALCULO DE DISTANCIAS
