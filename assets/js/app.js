@@ -1218,8 +1218,7 @@
 
   // Mantém o círculo atrás dos marcadores
   state.radiusCircle.bringToBack();
-  }
-  }
+    }
 
   // ==========================================
   // BASE FOTOGRAFICA DO SICG
