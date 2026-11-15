@@ -675,36 +675,29 @@
       state.userMarker = null;
     }
 
-    clearRadius();
+    function renderRadius(km) {
+  clearRadius();
 
-    const uf = el.ufFilter.value;
+  state.radiusCircle = L.circle(
+    [state.userLat, state.userLon],
+    {
+      radius: km * 1000,
+      color: '#67a7e8',
+      weight: 2,
+      fillColor: '#67a7e8',
+      fillOpacity: 0.06,
 
-    state.results = state.sites
-      .filter(site =>
-        (!uf || site.uf === uf) &&
-        matchesSite(site, query)
-      )
-      .sort((a, b) =>
-        String(a.identificacao_bem || '').localeCompare(
-          String(b.identificacao_bem || ''),
-          'pt-BR',
-          { sensitivity: 'base', numeric: true }
-        )
-      )
-      .map(site => ({
-        site,
-        km: null
-      }));
+      // Impede a interceptação dos cliques
+      interactive: false
 
-    el.coordInput.value = query;
-    el.calculateButton.disabled = false;
-    el.calculateButton.textContent = 'Pesquisar / calcular';
-
-    renderResults();
-
-    if (!state.results.length) {
-      showToast('Nenhum sítio corresponde à pesquisa.');
     }
+  ).addTo(state.map);
+
+  // Mantém o círculo atrás dos marcadores
+  state.radiusCircle.bringToBack();
+}
+
+    
   }
 
   // ==========================================
