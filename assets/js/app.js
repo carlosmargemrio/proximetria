@@ -105,7 +105,7 @@
     }
 
     el.coordInput.placeholder =
-      'Coordenadas, sítio ou município';
+      'Coordenadas, sítio ou município (ainda em construção)';
 
     el.coordInput.spellcheck = false;
 
